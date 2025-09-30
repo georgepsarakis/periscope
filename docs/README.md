@@ -1,4 +1,4 @@
-![Periscope Logo](images/logo-2.png)
+![Periscope Logo](images/logo-2-resized.png)
 
 # Periscope
 
