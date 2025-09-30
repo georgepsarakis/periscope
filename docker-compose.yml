@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: periscope_dev
+      POSTGRES_USER: periscope_dev
+      POSTGRES_PASSWORD: ${PERISCOPE_POSTGRES_PASSWORD}
+    volumes:
+      # Mount a local directory for persistent data
+      # The host path './data/postgres' will be created if it doesn't exist
+      - ./docker-volumes/postgres:/var/lib/postgresql/data
+      # Optional: Mount custom SQL scripts to initialize the database
+      # - ./init_scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432" # Still map host port 5432 to container port 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
