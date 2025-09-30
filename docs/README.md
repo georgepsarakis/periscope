@@ -1,3 +1,5 @@
+![Periscope Logo](images/logo-2.png)
+
 # Periscope
 
 Periscope is a self-contained error aggregator that uses in-memory pub/sub for asynchronous
