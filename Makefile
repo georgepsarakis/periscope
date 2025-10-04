@@ -3,3 +3,9 @@ migrate:
 
 migrations-list:
 	atlas migrate ls --env gorm
+
+lint:
+	golangci-lint run
+
+test:
+	go test -v ./...

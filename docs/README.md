@@ -16,12 +16,12 @@ for non-production environments.
 | Name                   | Description                                                                                          | Default     | 
 |------------------------|------------------------------------------------------------------------------------------------------|-------------|
 | `API_SECRET_KEY_ADMIN` | The API key used for accessing administration endpoints, e.g. creating new projects, listing alerts. |             |
-| `POSTGRES_HOST`        |                                                                                                      | `localhost` |
-| `POSTGRES_PORT`        |                                                                                                      | `5432`      |
-| `POSTGRES_USER`        |                                                                                                      | `pguser`    |
-| `POSTGRES_PASSWORD`    |                                                                                                      |             |
-| `POSTGRES_DATABASE`    |                                                                                                      | `periscope` |
-| `POSTGRES_ENABLED`     |                                                                                                      | `false`     |
+| `POSTGRES_HOST`        | Postgres server hostname or IP.                                                                      | `localhost` |
+| `POSTGRES_PORT`        | Postgres server port.                                                                                | `5432`      |
+| `POSTGRES_USER`        | Postgres username.                                                                                   | `pguser`    |
+| `POSTGRES_PASSWORD`    | Password for the Postgres user.                                                                      |             |
+| `POSTGRES_DATABASE`    | Name of the Postgres database.                                                                       | `periscope` |
+| `POSTGRES_ENABLED`     | When `true` the Postgres database configuration is used.                                             | `false`     |
 
 ## How It Works
 
@@ -30,6 +30,19 @@ You can use any official Sentry SDK to send events. An example using the [Go SDK
 in the [integration tests](tests/integration/event_group_custom_fingerprint_test.go).
 
 > :warning: [Sentry](https://sentry.io/) is an incredible platform for error monitoring! Periscope only aims to provide a very simplistic version of error aggregation functionality, using a simple architecture that should be easily deployed and operated.
+
+<div style="margin: auto; display: flex; justify-content: center; align-items: center;">
+
+```mermaid
+flowchart TD
+    A[CaptureException] -->|Error Event Flush| B(HTTP Ingestion Endpoint)
+    B --> C{Compute Fingerprint}
+    C -->|EventGroup Exists| D[Record Only]
+    C -->|New EventGroup| E[New Alert]
+    E --> F[Emit Notification]
+```
+
+</div>
 
 - Incoming events are validated and routed to projects.
 - Each new event is assigned to an event group, based on the extracted fingerprint, in an in-memory background process.
