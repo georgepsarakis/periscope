@@ -69,7 +69,7 @@ func (s *Server) ShutdownHandler(osSignalEnabled bool, cancelFunc func() error) 
 	s.close = func() error {
 		s.logger.Info("shutdown signal received")
 
-		defer s.logger.Sync()
+		defer s.logger.Sync() //nolint:errcheck
 
 		// Create a context with a timeout for graceful shutdown
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

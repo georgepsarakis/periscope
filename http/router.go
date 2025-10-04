@@ -32,11 +32,17 @@ func NewRouter(application app.App) *chi.Mux {
 	)
 
 	r.Use(middleware.RequestID)
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+			w.Header().Add(middleware.RequestIDHeader, middleware.GetReqID(r.Context()))
+		})
+	})
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(cors.Handler(cors.Options{
 		// TODO: transfer to configuration
-		AllowedOrigins:   []string{"localhost"},
+		AllowedOrigins:   application.HTTPAllowedOrigins(),
 		AllowedMethods:   []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,

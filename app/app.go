@@ -53,6 +53,10 @@ func (a App) HTTPServerHost() string {
 	return a.cfg.Host
 }
 
+func (a App) HTTPAllowedOrigins() []string {
+	return a.cfg.AllowedOrigins
+}
+
 func (a App) DebugEnabled() bool {
 	return a.cfg.Debug
 }

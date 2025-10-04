@@ -33,7 +33,9 @@ func NewServerError(ctx context.Context, err error) []byte {
 	if f := ZapErrorLogContext(err); len(f) > 0 {
 		logCtx = append(logCtx, f...)
 	}
-	logger.Error("unexpected error", logCtx...)
+	if logger != nil {
+		logger.Error("unexpected error", logCtx...)
+	}
 	return NewJSONError("Server Error", ErrorCodeServerError)
 }
 

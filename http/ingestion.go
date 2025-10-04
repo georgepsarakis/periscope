@@ -27,11 +27,13 @@ func (h EventHandler) IngestionHandler() func(w http.ResponseWriter, r *http.Req
 		ctx := r.Context()
 		logger := h.app.Logger
 		var ev Event
-		defer r.Body.Close()
+		defer r.Body.Close() //nolint:errcheck
 		scanner := bufio.NewReader(r.Body)
 		// Skip two lines
 		for range 2 {
-			scanner.ReadLine()
+			if _, _, err := scanner.ReadLine(); err != nil {
+				logger.Error("unable to scan lines", zap.Error(err))
+			}
 		}
 		if err := json.NewDecoder(scanner).Decode(&ev); err != nil {
 			w.WriteHeader(http.StatusBadRequest)

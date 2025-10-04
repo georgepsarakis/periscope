@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/georgepsarakis/periscope/app"
+	"github.com/georgepsarakis/periscope/newcontext"
 	"github.com/georgepsarakis/periscope/repository"
 )
 
@@ -33,14 +34,24 @@ func (h ProjectHandler) Read(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	inputID := chi.URLParam(r, "id")
 	id, err := strconv.Atoi(inputID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	prj, err := h.application.Repository.ProjectFindByID(ctx, uint(id))
 	if err != nil {
 		err := NewZapError(err, zap.String("project_id", inputID))
-		w.Write(NewServerError(ctx, err))
+		if _, writeErr := w.Write(NewServerError(ctx, err)); writeErr != nil {
+			l := newcontext.LoggerFromContext(ctx)
+			l.Error("writing response body failed",
+				zap.Error(err),
+				zap.String("project_id", inputID))
+			return
+		}
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	b, err := json.Marshal(
+	b, _ := json.Marshal(
 		ProjectReadResponse{
 			Project: Project{
 				ID:               prj.ID,
@@ -51,22 +62,35 @@ func (h ProjectHandler) Read(w http.ResponseWriter, r *http.Request) {
 				UpdatedAt:        prj.UpdatedAt,
 			},
 		})
-	w.Write(b)
+	if _, writeErr := w.Write(b); writeErr != nil {
+		l := newcontext.LoggerFromContext(ctx)
+		l.Error("writing response body failed",
+			zap.Error(err),
+			zap.String("project_id", inputID))
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
 func (h ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var req ProjectCreateRequest
+	logger := newcontext.LoggerFromContext(ctx)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(NewJSONError("json decoding failed", ErrorCodeJSONDecodingFailed))
+		if _, writeErr := w.Write(NewJSONError("json decoding failed", ErrorCodeJSONDecodingFailed)); writeErr != nil {
+			logger.Error("writing response body failed", zap.Error(err))
+			return
+		}
 		return
 	}
 
 	if err := h.validate.Struct(req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(NewJSONError("validation failed", ErrorCodeValidationFailed))
+		if _, writeErr := w.Write(NewJSONError("validation failed", ErrorCodeValidationFailed)); writeErr != nil {
+			logger.Error("writing response body failed", zap.Error(err))
+			return
+		}
 		return
 	}
 
@@ -75,7 +99,7 @@ func (h ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	b, err := json.Marshal(
+	b, _ := json.Marshal(
 		ProjectCreateResponse{
 			Project: Project{
 				ID:               prj.ID,
@@ -86,7 +110,14 @@ func (h ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 				UpdatedAt:        prj.UpdatedAt,
 			},
 		})
-	w.Write(b)
+	if _, writeErr := w.Write(b); writeErr != nil {
+		l := newcontext.LoggerFromContext(ctx)
+		l.Error("writing response body failed",
+			zap.Error(err),
+			zap.String("project_id", prj.PublicID))
+		return
+	}
+
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -113,10 +144,6 @@ func NewAlertHandler(application app.App) AlertHandler {
 func (h AlertHandler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	paramProjectID := chi.URLParam(r, "project_id")
-	//paramStatus := chi.URLParam(r, "status")
-	//if status == "" {
-	//	status = "pending"
-	//}
 	projectID, err := strconv.Atoi(paramProjectID)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -139,7 +166,12 @@ func (h AlertHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	w.Write(b)
+	if _, err := w.Write(b); err != nil {
+		l := newcontext.LoggerFromContext(ctx)
+		l.Error("writing response body failed",
+			zap.Error(err),
+			zap.String("project_id", paramProjectID))
+	}
 }
 
 type AlertListResponse struct {

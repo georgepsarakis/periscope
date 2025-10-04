@@ -15,17 +15,18 @@ func TestNewServerError(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want []byte
+		want string
 	}{
 		{
 			name: "nil error",
-			args: args{err: nil},
+			args: args{err: nil, ctx: context.Background()},
+			want: `{"code":500, "message":"Server Error"}`,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resp := NewServerError(tt.args.ctx, tt.args.err)
-			assert.JSONEq(t, string(tt.want), string(resp))
+			assert.JSONEq(t, tt.want, string(resp))
 		})
 	}
 }

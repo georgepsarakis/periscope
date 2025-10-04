@@ -21,6 +21,4 @@ func (l LogNotifier) Emit(_ context.Context, event Event) error {
 	return nil
 }
 
-func (l LogNotifier) OnSuccess(func(ctx context.Context, event Event) error) {
-	return
-}
+func (l LogNotifier) OnSuccess(func(ctx context.Context, event Event) error) {}

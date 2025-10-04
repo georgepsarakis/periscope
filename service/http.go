@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log"
 	"os"
 	"time"
 
@@ -76,7 +77,9 @@ func NewHTTPService(opts Options) (*http.Server, CleanupFunc, OnShutdownErrorFun
 
 	return httpServer, cleanup, func(err error) {
 		application.Logger.Error("error during server shutdown", zap.Error(err))
-		cleanup()
+		if err := cleanup(); err != nil {
+			log.Fatal(err.Error())
+		}
 		os.Exit(1)
 	}
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -30,14 +29,14 @@ func TestEventForwarding_CustomFingerprint(t *testing.T) {
 	t.Cleanup(func() {
 		os.Remove(tempFilePath)
 	})
-	t.Log(fmt.Sprintf("temporary database file: %s", tempFilePath))
+	t.Logf("temporary database file: %s", tempFilePath)
 	t.Setenv("SQLITE_PATH", tempFilePath)
 	server, cleanup, _ := service.NewHTTPService(service.Options{OSSignalListenerDisabled: true})
 	go func() {
 		require.NoError(t, server.Run())
 	}()
 	t.Cleanup(func() {
-		cleanup()
+		cleanup() //nolint:errcheck
 		require.NoError(t, server.Close())
 	})
 
@@ -76,7 +75,7 @@ func TestEventForwarding_CustomFingerprint(t *testing.T) {
 		scope.SetLevel(sentry.LevelError)
 		scope.SetFingerprint([]string{"test", "1", "2", "3"})
 		for n := range 10 {
-			hub.CaptureException(errors.New(fmt.Sprintf("test error %d", n)))
+			hub.CaptureException(fmt.Errorf("test error %d", n))
 		}
 	})
 	time.Sleep(time.Second)
