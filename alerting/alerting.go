@@ -59,9 +59,9 @@ func (a Alerting) Scheduler(ctx context.Context) func() error {
 			case <-ticker.C:
 				// TODO: add watcher goroutine and emit heartbeats from all background workers
 				alert, err := a.application.Repository.AlertFindByNotNotified(ctx)
-				if err != nil && !errors.Is(err, repository.RecordNotFound) {
+				if err != nil && !errors.Is(err, repository.ErrRecordNotFound) {
 					logger.Error("failed to query alerting status", zap.Error(err))
-				} else if errors.Is(err, repository.RecordNotFound) {
+				} else if errors.Is(err, repository.ErrRecordNotFound) {
 					continue
 				}
 				if err := a.alertNotifications(ctx, alert); err != nil {
@@ -69,12 +69,12 @@ func (a Alerting) Scheduler(ctx context.Context) func() error {
 				}
 
 				n, err := a.application.Repository.FindAlertDestinationNotificationByNonCompleted(ctx)
-				if err != nil && !errors.Is(err, repository.RecordNotFound) {
+				if err != nil && !errors.Is(err, repository.ErrRecordNotFound) {
 					logger.Error("failed to query alerting destination notifications", zap.Error(err))
 					continue
 				}
 				ad, err := a.application.Repository.FindAlertDestinationByID(ctx, n.ProjectAlertDestinationID)
-				if err != nil && !errors.Is(err, repository.RecordNotFound) {
+				if err != nil && !errors.Is(err, repository.ErrRecordNotFound) {
 					logger.Error("failed to find project alert destination", zap.Error(err))
 					continue
 				}
@@ -85,7 +85,7 @@ func (a Alerting) Scheduler(ctx context.Context) func() error {
 					zap.Uint("alert_destination_type_id", ad.AlertDestinationTypeID))
 
 				ev, err := a.application.Repository.EventFindLatestByProjectAndEventGroup(ctx, alert.ProjectID, alert.EventGroupID)
-				if err != nil && !errors.Is(err, repository.RecordNotFound) {
+				if err != nil && !errors.Is(err, repository.ErrRecordNotFound) {
 					logger.Error("failed to query alerting events", zap.Error(err))
 					continue
 				}
@@ -110,7 +110,7 @@ func (a Alerting) Scheduler(ctx context.Context) func() error {
 				}
 
 				_, err = a.application.Repository.AlertDestinationNotificationUpdateCompletedAt(ctx, n.ID, time.Now().UTC())
-				if err != nil && !errors.Is(err, repository.RecordNotFound) {
+				if err != nil && !errors.Is(err, repository.ErrRecordNotFound) {
 					logger.Error("failed to update alert destination notification", zap.Error(err))
 					continue
 				}

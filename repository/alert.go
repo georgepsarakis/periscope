@@ -11,7 +11,7 @@ import (
 	"github.com/georgepsarakis/periscope/repository/rdbms"
 )
 
-var RecordNotFound = errors.New("record not found")
+var ErrRecordNotFound = errors.New("record not found")
 
 func (r *Repository) AlertFindByNotNotified(ctx context.Context) (Alert, error) {
 	alert := rdbms.Alert{}
@@ -19,7 +19,7 @@ func (r *Repository) AlertFindByNotNotified(ctx context.Context) (Alert, error) 
 		Where("notified_at IS NULL").
 		First(&alert); tx.Error != nil {
 		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-			return Alert{}, RecordNotFound
+			return Alert{}, ErrRecordNotFound
 		}
 		return Alert{}, tx.Error
 	}
@@ -124,7 +124,7 @@ func (r *Repository) FindAlertDestinationNotificationByNonCompleted(ctx context.
 			}
 		}
 		if n.ID == 0 {
-			return RecordNotFound
+			return ErrRecordNotFound
 		}
 		res = tx.Model(&n).Update("total_attempts", gorm.Expr("total_attempts + ?", 1))
 		if res.Error != nil {

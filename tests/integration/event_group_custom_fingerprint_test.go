@@ -26,8 +26,9 @@ func TestEventForwarding_CustomFingerprint(t *testing.T) {
 	tempFile, err := os.CreateTemp("", "tmp-*.db")
 	require.NoError(t, err)
 	tempFilePath := tempFile.Name()
+	t.Logf("using temporary file %q for SQLite", tempFilePath)
 	t.Cleanup(func() {
-		os.Remove(tempFilePath)
+		os.Remove(tempFilePath) //nolint:errcheck
 	})
 	t.Logf("temporary database file: %s", tempFilePath)
 	t.Setenv("SQLITE_PATH", tempFilePath)
