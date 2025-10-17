@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 
 	"github.com/georgepsarakis/periscope/app"
 	"github.com/georgepsarakis/periscope/newcontext"
@@ -176,4 +177,76 @@ func (h AlertHandler) List(w http.ResponseWriter, r *http.Request) {
 
 type AlertListResponse struct {
 	Alerts []repository.Alert `json:"alerts"`
+}
+
+type AlertDestinationHandler struct {
+	application app.App
+	validate    *validator.Validate
+}
+
+func NewAlertDestinationHandler(application app.App) AlertDestinationHandler {
+	return AlertDestinationHandler{
+		application: application,
+		validate:    validator.New(validator.WithRequiredStructEnabled()),
+	}
+}
+
+type AlertDestinationCreateRequest struct {
+	Type           string            `json:"type" validate:"required"`
+	WebhookURL     *string           `json:"webhook_url" validate:"omitempty,http_url"`
+	WebhookHeaders map[string]string `json:"webhook_headers" validate:"omitempty"`
+}
+
+// Create creates a new alert notification destination. The request model is AlertDestinationCreateRequest.
+func (h AlertDestinationHandler) Create(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	projectID, err := strconv.Atoi(chi.URLParam(r, "project_id"))
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	req := AlertDestinationCreateRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		if _, writeErr := w.Write(NewJSONError("validation failed", ErrorCodeValidationFailed)); writeErr != nil {
+			l := newcontext.LoggerFromContext(ctx)
+			l.Error("writing response body failed")
+			return
+		}
+	}
+	var cfg *repository.AlertDestinationNotificationWebhookConfiguration
+	if req.WebhookURL != nil {
+		cfg = &repository.AlertDestinationNotificationWebhookConfiguration{
+			URL:     *req.WebhookURL,
+			Headers: req.WebhookHeaders,
+		}
+	}
+	var pad repository.ProjectAlertDestination
+	err = h.application.Repository.NewTransaction(func(tx *gorm.DB) error {
+		var err error
+		ctx := newcontext.WithDBTransaction(ctx, tx)
+		pad, err = h.application.Repository.CreateProjectAlertDestination(ctx, uint(projectID), req.Type, cfg)
+		return err
+	})
+	if err != nil {
+		l := newcontext.LoggerFromContext(ctx)
+		w.WriteHeader(http.StatusInternalServerError)
+		if _, writeErr := w.Write(NewServerError(ctx, err)); writeErr != nil {
+			l.Error("writing response body failed")
+			return
+		}
+		l.Error("persisting project alert destination failed", zap.Error(err))
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	b, _ := json.Marshal(pad)
+	if _, err := w.Write(b); err != nil {
+		l := newcontext.LoggerFromContext(ctx)
+		l.Error("writing response body failed")
+		return
+	}
 }

@@ -2,12 +2,13 @@ package alerting
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strconv"
 	"time"
 
+	"github.com/georgepsarakis/go-httpclient"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
@@ -32,14 +33,26 @@ func NewAlerting(application app.App, schedulerInterval time.Duration) Alerting 
 
 func (a Alerting) Scheduler(ctx context.Context) func() error {
 	return func() error {
+		log := a.application.Logger
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("panic recovered",
+					zap.String("panic", fmt.Sprintf("%s", r)),
+					zap.Any("stacktrace", string(debug.Stack())))
+			}
+		}()
 		ticker := time.NewTicker(a.schedulerInterval)
 		defer ticker.Stop()
-		logger := a.application.Logger
 
 		adt, err := a.application.Repository.AlertDestinationTypeFindAll(ctx)
 		if err != nil {
-			logger.Warn("unable to get alerting destination type", zap.Error(err))
+			log.Warn("unable to get alerting destination type", zap.Error(err))
 			return err
+		}
+
+		destinationTypesById := make(map[uint]repository.AlertDestinationType)
+		for _, d := range adt {
+			destinationTypesById[d.ID] = d
 		}
 
 		destinationChannels := make(map[uint]notification.Channel)
@@ -47,75 +60,94 @@ func (a Alerting) Scheduler(ctx context.Context) func() error {
 			switch d.Key {
 			case rdbms.AlertDestinationTypeKeyInternalLogger:
 				destinationChannels[d.ID] = notification.LogNotifier{
-					Logger: logger,
+					Logger: log,
 				}
+			case rdbms.AlertDestinationTypeKeyGenericWebhook:
+				// TODO: change interface for webhooks channel
+				destinationChannels[d.ID] = notification.NewGenericWebhookNotification(
+					notification.GenericWebhookNotificationSettings{
+						HTTPClient: httpclient.New(),
+					},
+				)
 			}
 		}
 
-		logger.Info("alerting ticker started")
-		defer logger.Info("alerting ticker stopped")
+		log.Info("alerting ticker started")
+		defer log.Info("alerting ticker stopped")
 		for {
 			select {
 			case <-ticker.C:
 				// TODO: add watcher goroutine and emit heartbeats from all background workers
 				alert, err := a.application.Repository.AlertFindByNotNotified(ctx)
 				if err != nil && !errors.Is(err, repository.ErrRecordNotFound) {
-					logger.Error("failed to query alerting status", zap.Error(err))
-				} else if errors.Is(err, repository.ErrRecordNotFound) {
+					log.Error("failed to query alerting status", zap.Error(err))
 					continue
 				}
-				if err := a.alertNotifications(ctx, alert); err != nil {
-					logger.Error("failed to create alert notifications", zap.Error(err))
+				if !errors.Is(err, repository.ErrRecordNotFound) {
+					if err := a.alertNotifications(ctx, alert); err != nil {
+						log.Error("failed to create alert notifications", zap.Error(err))
+						continue
+					}
 				}
 
 				n, err := a.application.Repository.FindAlertDestinationNotificationByNonCompleted(ctx)
-				if err != nil && !errors.Is(err, repository.ErrRecordNotFound) {
-					logger.Error("failed to query alerting destination notifications", zap.Error(err))
+				if err != nil {
+					if !errors.Is(err, repository.ErrRecordNotFound) {
+						log.Error("failed to query alerting destination notifications", zap.Error(err))
+					}
 					continue
 				}
 				ad, err := a.application.Repository.FindAlertDestinationByID(ctx, n.ProjectAlertDestinationID)
-				if err != nil && !errors.Is(err, repository.ErrRecordNotFound) {
-					logger.Error("failed to find project alert destination", zap.Error(err))
+				if err != nil {
+					log.Error("failed to find project alert destination", zap.Error(err))
 					continue
 				}
 
-				logger.Info("notifications sent",
+				log.Info("notifications sent",
 					zap.Uint("project_id", ad.ProjectID),
 					zap.Uint("alert_id", alert.ID),
 					zap.Uint("alert_destination_type_id", ad.AlertDestinationTypeID))
 
 				ev, err := a.application.Repository.EventFindLatestByProjectAndEventGroup(ctx, alert.ProjectID, alert.EventGroupID)
 				if err != nil && !errors.Is(err, repository.ErrRecordNotFound) {
-					logger.Error("failed to query alerting events", zap.Error(err))
+					log.Error("failed to query alerting events", zap.Error(err))
 					continue
 				}
-				ch := destinationChannels[ad.AlertDestinationTypeID]
-				b, err := json.Marshal(ev)
-				if err != nil {
-					logger.Error("failed to marshal alerting event", zap.Error(err))
-					continue
+				destinationType := destinationTypesById[ad.AlertDestinationTypeID]
+				var ch notification.Channel
+				switch destinationType.Key {
+				case rdbms.AlertDestinationTypeKeyGenericWebhook:
+					ch = notification.NewGenericWebhookNotification(notification.GenericWebhookNotificationSettings{
+						HTTPClient:  httpclient.New(),
+						WebhookURL:  ad.WebhookConfiguration.URL,
+						HTTPHeaders: ad.WebhookConfiguration.Headers,
+					})
+				case rdbms.AlertDestinationTypeKeyInternalLogger:
+					ch = notification.LogNotifier{
+						Logger: log,
+					}
 				}
 				if err := ch.Emit(ctx, notification.Event{
-					ID:   ev.EventID,
-					Type: strconv.Itoa(int(ev.EventGroupID)),
-					Data: b,
-					Attributes: notification.EventAttributes{
+					ID:    ev.EventID,
+					Type:  strconv.Itoa(int(ev.EventGroupID)),
+					Alert: alert,
+					Details: notification.EventDetails{
 						Title:        ev.Title,
 						AlertID:      strconv.Itoa(int(alert.ID)),
 						EventGroupID: strconv.Itoa(int(alert.EventGroupID)),
 						ProjectID:    strconv.Itoa(int(alert.ProjectID)),
 					},
 				}); err != nil {
-					logger.Error("failed to emit alerting event", zap.Error(err))
+					log.Error("failed to emit alerting event", zap.Error(err))
 				}
 
 				_, err = a.application.Repository.AlertDestinationNotificationUpdateCompletedAt(ctx, n.ID, time.Now().UTC())
 				if err != nil && !errors.Is(err, repository.ErrRecordNotFound) {
-					logger.Error("failed to update alert destination notification", zap.Error(err))
+					log.Error("failed to update alert destination notification", zap.Error(err))
 					continue
 				}
 			case <-ctx.Done():
-				logger.Info("alerting stopped due to timeout or cancellation")
+				log.Info("alerting stopped due to timeout or cancellation")
 				return nil
 			}
 		}
@@ -131,9 +163,15 @@ func (a Alerting) alertNotifications(ctx context.Context, alert repository.Alert
 		if err != nil {
 			return fmt.Errorf("failed to update alerting status: %w", err)
 		}
-		_, err = a.application.Repository.CreateAlertDestinationNotification(ctx, alert.ID, 1)
+		ads, err := a.application.Repository.FindAlertDestinationsByProjectID(ctx, alert.ProjectID)
 		if err != nil {
-			return fmt.Errorf("failed to create alert destination notification: %w", err)
+			return fmt.Errorf("failed to find alerting destinations: %w", err)
+		}
+		for _, ad := range ads {
+			_, err = a.application.Repository.CreateAlertDestinationNotification(ctx, alert.ID, ad.ID)
+			if err != nil {
+				return fmt.Errorf("failed to create alert destination notification: %w", err)
+			}
 		}
 		return nil
 	})

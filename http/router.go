@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/georgepsarakis/periscope/app"
+	"github.com/georgepsarakis/periscope/newcontext"
 )
 
 type requestLogger struct {
@@ -40,6 +41,13 @@ func NewRouter(application app.App) *chi.Mux {
 	})
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
+	// Inject logger in the context
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := newcontext.WithLogger(r.Context(), application.Logger)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	})
 	r.Use(cors.Handler(cors.Options{
 		// TODO: transfer to configuration
 		AllowedOrigins:   application.HTTPAllowedOrigins(),

@@ -21,9 +21,9 @@ type Event struct {
 
 type Project struct {
 	gorm.Model
-	Name             string `gorm:"not null;index:uq_project_name,unique"`
-	PublicID         string `gorm:"not null;index:uq_project_public_id,unique"`
-	IngestionAPIKeys []ProjectIngestionAPIKey
+	Name                    string `gorm:"not null;index:uq_project_name,unique"`
+	PublicID                string `gorm:"not null;index:uq_project_public_id,unique"`
+	ProjectIngestionAPIKeys []ProjectIngestionAPIKey
 }
 
 type ProjectIngestionAPIKey struct {
@@ -47,7 +47,6 @@ type ProjectAlertDestination struct {
 	ProjectID              uint `gorm:"not null"`
 	AlertDestinationTypeID uint `gorm:"not null"`
 	AlertDestinationType   AlertDestinationType
-	Configuration          json.RawMessage `gorm:"type:json"`
 }
 
 type AlertDestinationType struct {
@@ -57,7 +56,9 @@ type AlertDestinationType struct {
 }
 
 const (
-	AlertDestinationTypeKeyInternalLogger = "internal.logger"
+	AlertDestinationTypeKeyInternalLogger = "internal.logger.error"
+	AlertDestinationTypeKeyGenericWebhook = "external.webhook.generic"
+	AlertDestinationTypeKeySlackWebhook   = "external.webhook.slack"
 )
 
 type Alert struct {
@@ -74,8 +75,18 @@ type Alert struct {
 
 type AlertDestinationNotification struct {
 	gorm.Model
-	AlertID                   uint       `gorm:"not null;index:idx_alert_destinations_alert_id"`
-	ProjectAlertDestinationID uint       `gorm:"not null"`
-	CompletedAt               *time.Time `gorm:"null;index:idx_alert_destination_notifications_completed_at"`
-	TotalAttempts             int        `gorm:"not null"`
+	AlertID                   uint           `gorm:"not null;index:idx_alert_destinations_alert_id"`
+	ProjectAlertDestinationID uint           `gorm:"not null"`
+	LastError                 map[string]any `gorm:"null;serializer:json"`
+	AttemptedAt               sql.NullTime   `gorm:"null"`
+	CompletedAt               *time.Time     `gorm:"null;index:idx_alert_destination_notifications_completed_at"`
+	TotalAttempts             int            `gorm:"not null"`
+}
+
+type AlertDestinationNotificationWebhookConfiguration struct {
+	gorm.Model
+	ProjectAlertDestinationID uint              `gorm:"not null"`
+	URL                       string            `gorm:"not null"`
+	HTTPMethod                string            `gorm:"not null"`
+	Headers                   map[string]string `gorm:"null;serializer:json"`
 }

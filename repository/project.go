@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 
@@ -56,6 +57,9 @@ func (r *Repository) ProjectFindByID(ctx context.Context, id uint) (Project, err
 	project := Project{}
 	tx := r.database.WithContext(ctx).Preload("ProjectIngestionAPIKeys").First(&project, id)
 	if tx.Error != nil {
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			return Project{}, ErrRecordNotFound
+		}
 		return Project{}, tx.Error
 	}
 	return project, nil
@@ -84,21 +88,6 @@ func (r *Repository) ProjectFindByPublicID(ctx context.Context, publicID string)
 		project = p
 	}
 	return project, nil
-}
-
-type ProjectAlertDestinationCreateInput rdbms.ProjectAlertDestination
-
-func (r *Repository) ProjectAlertDestinationCreate(ctx context.Context, ad ProjectAlertDestinationCreateInput) error {
-	tx := r.dbExecutor(ctx)
-	a := rdbms.ProjectAlertDestination{
-		AlertDestinationTypeID: ad.AlertDestinationTypeID,
-		ProjectID:              ad.ProjectID,
-		Configuration:          ad.Configuration,
-	}
-	if r := tx.Create(&a); r.Error != nil {
-		return r.Error
-	}
-	return nil
 }
 
 func (r *Repository) AlertDestinationTypeFindAll(ctx context.Context) ([]AlertDestinationType, error) {

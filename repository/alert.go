@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -126,7 +127,10 @@ func (r *Repository) FindAlertDestinationNotificationByNonCompleted(ctx context.
 		if n.ID == 0 {
 			return ErrRecordNotFound
 		}
-		res = tx.Model(&n).Update("total_attempts", gorm.Expr("total_attempts + ?", 1))
+		res = tx.Model(&n).Updates(map[string]any{
+			"total_attempts": gorm.Expr("total_attempts + ?", 1),
+			"attempted_at":   r.now(),
+		})
 		if res.Error != nil {
 			return res.Error
 		}
@@ -149,6 +153,14 @@ func (r *Repository) FindAlertDestinationByID(ctx context.Context, id uint) (Pro
 	if tx.Error != nil {
 		return ProjectAlertDestination{}, tx.Error
 	}
+
+	webhookCfg := &rdbms.AlertDestinationNotificationWebhookConfiguration{}
+	tx = db.Model(&rdbms.AlertDestinationNotificationWebhookConfiguration{}).
+		Where("project_alert_destination_id = ?", pad.ID).Find(webhookCfg)
+	if tx.Error != nil {
+		return ProjectAlertDestination{}, tx.Error
+	}
+
 	return ProjectAlertDestination{
 		BaseModel: BaseModel{
 			ID:        pad.ID,
@@ -157,8 +169,41 @@ func (r *Repository) FindAlertDestinationByID(ctx context.Context, id uint) (Pro
 		},
 		ProjectID:              pad.ProjectID,
 		AlertDestinationTypeID: pad.AlertDestinationTypeID,
-		Configuration:          pad.Configuration,
+		WebhookConfiguration: &AlertDestinationNotificationWebhookConfiguration{
+			BaseModel: BaseModel{
+				ID:        webhookCfg.ID,
+				CreatedAt: webhookCfg.CreatedAt,
+				UpdatedAt: webhookCfg.UpdatedAt,
+			},
+			ProjectAlertDestinationID: webhookCfg.ProjectAlertDestinationID,
+			URL:                       webhookCfg.URL,
+			Headers:                   webhookCfg.Headers,
+		},
 	}, nil
+}
+
+func (r *Repository) FindAlertDestinationsByProjectID(ctx context.Context, id uint) ([]ProjectAlertDestination, error) {
+	db := r.dbExecutor(ctx)
+	var ad []rdbms.ProjectAlertDestination
+	tx := db.Model(&rdbms.ProjectAlertDestination{}).
+		Where("project_id = ?", id).Find(&ad)
+	if tx.Error != nil {
+		return []ProjectAlertDestination{}, tx.Error
+	}
+
+	var result []ProjectAlertDestination
+	for _, a := range ad {
+		result = append(result, ProjectAlertDestination{
+			BaseModel: BaseModel{
+				ID:        a.ID,
+				CreatedAt: a.CreatedAt,
+				UpdatedAt: a.UpdatedAt,
+			},
+			ProjectID:              a.ProjectID,
+			AlertDestinationTypeID: a.AlertDestinationTypeID,
+		})
+	}
+	return result, nil
 }
 
 func (r *Repository) AlertDestinationNotificationUpdateCompletedAt(ctx context.Context, id uint, ts time.Time) (AlertDestinationNotification, error) {
@@ -168,4 +213,79 @@ func (r *Repository) AlertDestinationNotificationUpdateCompletedAt(ctx context.C
 		return AlertDestinationNotification{}, res.Error
 	}
 	return AlertDestinationNotification{}, nil
+}
+
+func (r *Repository) AlertDestinationNotificationUpdateFailure(ctx context.Context, id uint, ts time.Time) (AlertDestinationNotification, error) {
+	tx := r.dbExecutor(ctx)
+	res := tx.Model(&rdbms.AlertDestinationNotification{}).Where("id = ?", id).Updates(map[string]any{"completed_at": ts})
+	if res.Error != nil {
+		return AlertDestinationNotification{}, res.Error
+	}
+	return AlertDestinationNotification{}, nil
+}
+
+func (r *Repository) CreateProjectAlertDestination(ctx context.Context, projectID uint, typeAlias string, webhookCfg *AlertDestinationNotificationWebhookConfiguration) (ProjectAlertDestination, error) {
+	tx := r.dbExecutor(ctx)
+	var searchKey string
+	switch typeAlias {
+	case "generic_webhook":
+		searchKey = rdbms.AlertDestinationTypeKeyGenericWebhook
+	case "slack_webhook":
+		searchKey = rdbms.AlertDestinationTypeKeySlackWebhook
+	case "internal_logger":
+		searchKey = rdbms.AlertDestinationTypeKeyInternalLogger
+	default:
+		return ProjectAlertDestination{}, fmt.Errorf("unknown type: %s", typeAlias)
+	}
+	adt := &rdbms.AlertDestinationType{}
+	err := tx.Model(&rdbms.AlertDestinationType{}).Where("key = ?", searchKey).First(&adt).Error
+	if err != nil {
+		return ProjectAlertDestination{}, err
+	}
+	d := rdbms.ProjectAlertDestination{
+		ProjectID:              projectID,
+		AlertDestinationTypeID: adt.ID,
+	}
+	if res := tx.Create(&d); res.Error != nil {
+		return ProjectAlertDestination{}, tx.Error
+	}
+	if webhookCfg == nil {
+		return ProjectAlertDestination{
+			BaseModel: BaseModel{
+				ID:        d.ID,
+				CreatedAt: d.CreatedAt,
+				UpdatedAt: d.UpdatedAt,
+			},
+			ProjectID:              projectID,
+			AlertDestinationTypeID: adt.ID,
+		}, nil
+	}
+
+	wc := rdbms.AlertDestinationNotificationWebhookConfiguration{
+		ProjectAlertDestinationID: d.ID,
+		URL:                       webhookCfg.URL,
+		Headers:                   webhookCfg.Headers,
+	}
+
+	if res := tx.Create(&wc); res.Error != nil {
+		return ProjectAlertDestination{}, tx.Error
+	}
+	return ProjectAlertDestination{
+		BaseModel: BaseModel{
+			ID:        d.ID,
+			CreatedAt: d.CreatedAt,
+			UpdatedAt: d.UpdatedAt,
+		},
+		ProjectID:              projectID,
+		AlertDestinationTypeID: adt.ID,
+		WebhookConfiguration: &AlertDestinationNotificationWebhookConfiguration{
+			BaseModel: BaseModel{
+				ID:        wc.ID,
+				CreatedAt: wc.CreatedAt,
+				UpdatedAt: wc.UpdatedAt,
+			},
+			URL:     wc.URL,
+			Headers: wc.Headers,
+		},
+	}, nil
 }

@@ -80,13 +80,20 @@ type AlertDestinationNotification struct {
 
 type ProjectAlertDestination struct {
 	BaseModel
-	ProjectID              uint            `json:"project_id"`
-	AlertDestinationTypeID uint            `json:"alert_destination_type_id"`
-	Configuration          json.RawMessage `json:"configuration"`
+	ProjectID              uint                                              `json:"project_id"`
+	AlertDestinationTypeID uint                                              `json:"alert_destination_type_id"`
+	WebhookConfiguration   *AlertDestinationNotificationWebhookConfiguration `json:"webhook_configuration"`
 }
 
 type AlertDestinationType struct {
 	BaseModel
 	Title string `json:"title"`
 	Key   string `json:"key"`
+}
+
+type AlertDestinationNotificationWebhookConfiguration struct {
+	BaseModel
+	ProjectAlertDestinationID uint              `json:"project_alert_destination_id"`
+	URL                       string            `json:"url"`
+	Headers                   map[string]string `json:"headers"`
 }

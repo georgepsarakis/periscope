@@ -113,6 +113,7 @@ func New() (App, func() error, error) {
 			&rdbms.AlertDestinationType{},
 			&rdbms.ProjectAlertDestination{},
 			&rdbms.ProjectIngestionAPIKey{},
+			&rdbms.AlertDestinationNotificationWebhookConfiguration{},
 		); err != nil {
 			panic(err)
 		}

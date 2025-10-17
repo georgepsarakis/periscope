@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log"
+	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	apikey "github.com/georgepsarakis/chi-api-key-auth"
@@ -13,9 +16,10 @@ import (
 
 	"github.com/georgepsarakis/periscope/alerting"
 	"github.com/georgepsarakis/periscope/app"
-	"github.com/georgepsarakis/periscope/http"
+	periscopeHttp "github.com/georgepsarakis/periscope/http"
 	"github.com/georgepsarakis/periscope/ingestion"
 	"github.com/georgepsarakis/periscope/newcontext"
+	"github.com/georgepsarakis/periscope/repository"
 )
 
 type OnShutdownErrorFunc func(error)
@@ -25,13 +29,13 @@ type Options struct {
 	OSSignalListenerDisabled bool
 }
 
-func NewHTTPService(opts Options) (*http.Server, CleanupFunc, OnShutdownErrorFunc) {
+func NewHTTPService(opts Options) (*periscopeHttp.Server, CleanupFunc, OnShutdownErrorFunc) {
 	application, cleanup, err := app.New()
 	if err != nil {
 		panic(err)
 	}
 
-	httpServer := http.NewServer(application.Logger, http.NetworkAddress{
+	httpServer := periscopeHttp.NewServer(application.Logger, periscopeHttp.NetworkAddress{
 		Host: application.HTTPServerHost(),
 		Port: application.HTTPServerListeningPort(),
 	})
@@ -55,12 +59,13 @@ func NewHTTPService(opts Options) (*http.Server, CleanupFunc, OnShutdownErrorFun
 	grp.Go(alerting.NewAlerting(application, time.Second).Scheduler(ctx))
 	httpServer.OnShutdown(grp.Wait)
 
-	eventHandler := http.NewEventHandler(application, aggr)
+	eventHandler := periscopeHttp.NewEventHandler(application, aggr)
+	adtHandler := periscopeHttp.NewAlertDestinationHandler(application)
 
-	r := http.NewRouter(application)
+	r := periscopeHttp.NewRouter(application)
 	r.Post("/api/{project_id}/envelope", eventHandler.IngestionHandler())
-	prjHandler := http.NewProjectHandler(application)
-	alertHandler := http.NewAlertHandler(application)
+	prjHandler := periscopeHttp.NewProjectHandler(application)
+	alertHandler := periscopeHttp.NewAlertHandler(application)
 	r.Route("/api/admin", func(r chi.Router) {
 		apiKeyOpts := apikey.Options{
 			SecretProvider: &apikey.EnvironmentSecretProvider{
@@ -71,12 +76,42 @@ func NewHTTPService(opts Options) (*http.Server, CleanupFunc, OnShutdownErrorFun
 		r.Use(apikey.Authorize(apiKeyOpts))
 		r.Post("/projects", prjHandler.Create)
 		r.Get("/projects/{id}", prjHandler.Read)
-		r.Get("/projects/{project_id}/alerts", alertHandler.List)
+		r.Group(func(r chi.Router) {
+			r.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					projectID := chi.URLParam(r, "project_id")
+					pid, err := strconv.Atoi(projectID)
+					if err != nil {
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					ctx := r.Context()
+					_, err = application.Repository.ProjectFindByID(ctx, uint(pid))
+					if err != nil {
+						if errors.Is(err, repository.ErrRecordNotFound) {
+							w.WriteHeader(http.StatusNotFound)
+							return
+						}
+						w.WriteHeader(http.StatusInternalServerError)
+						application.Logger.Error(
+							"failed to retrieve project",
+							zap.String("project_id", projectID), zap.Error(err))
+						return
+					}
+					next.ServeHTTP(w, r)
+				})
+			})
+			r.Get("/projects/{project_id}/alerts", alertHandler.List)
+			r.Post("/projects/{project_id}/alert_notification_destinations", adtHandler.Create)
+		})
 	})
 	httpServer.SetHandler(r)
 
 	return httpServer, cleanup, func(err error) {
-		application.Logger.Error("error during server shutdown", zap.Error(err))
+		if err == nil {
+			return
+		}
+		log.Println("error during server shutdown:" + err.Error())
 		if err := cleanup(); err != nil {
 			log.Fatal(err.Error())
 		}
